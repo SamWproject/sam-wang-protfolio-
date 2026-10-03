@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Three-Statement Simulator</title>
+<style>
+:root{--bg:#0b1426;--p:#121d33;--p2:#18253f;--ln:#26364f;--tx:#dbe4f3;--mu:#8a9bb8;--ac:#6ea8e0;--pos:#3fb27f;--neg:#e5675b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--ln)}
+h1{font-size:18px;margin:0;font-weight:600}h2{font-size:15px;margin:0 0 8px}h3{font-size:13px;margin:14px 0 6px;color:var(--ac)}
+.badge{padding:5px 12px;border-radius:4px;font-weight:600;font-size:13px}.ok{background:#12372b;color:var(--pos)}.bad{background:#40201e;color:var(--neg)}
+nav{display:flex;gap:4px;padding:10px 22px 0}nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--mu);padding:8px 14px;cursor:pointer;font:inherit}
+nav button.on{color:var(--tx);border-color:var(--ac)}
+.wrap{display:grid;grid-template-columns:330px 1fr;gap:18px;padding:18px 22px}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--p);border:1px solid var(--ln);border-radius:6px;padding:14px;margin-bottom:14px}
+label{display:block;color:var(--mu);font-size:12px;margin:8px 0 3px}
+select,input,textarea{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--ln);border-radius:4px;padding:7px;font:inherit}
+button.b{background:var(--ac);color:#06101f;border:0;border-radius:4px;padding:7px 12px;font:inherit;font-weight:600;cursor:pointer;margin:8px 6px 0 0}
+button.g{background:var(--p2);color:var(--tx);border:1px solid var(--ln)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--ac)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
+th{color:var(--mu);font-weight:500;text-align:right;border-bottom:1px solid var(--ln);padding:4px 6px}th:first-child,td:first-child{text-align:left}
+td{padding:3px 6px;text-align:right;border-bottom:1px solid #1b2a44}tr.t td{font-weight:600;background:var(--p2)}
+.p{color:var(--pos)}.n{color:var(--neg)}.z{color:var(--mu)}
+.tri{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+.chain{display:flex;flex-direction:column;gap:2px}.step{background:var(--p2);border-left:3px solid var(--ac);padding:8px 12px;border-radius:3px;opacity:0;animation:in .4s forwards}
+.arr{color:var(--ac);text-align:center;opacity:0;animation:in .3s forwards;line-height:1}
+@keyframes in{to{opacity:1}}@media(prefers-reduced-motion:reduce){.step,.arr{animation-duration:.01s}}
+.chk{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px}
+.small{font-size:12px;color:var(--mu)}ul{margin:4px 0;padding-left:18px}
+.j{max-height:180px;overflow:auto;font-size:13px}.lsn{display:block;width:100%;text-align:left;background:none;border:0;color:var(--tx);padding:5px 6px;cursor:pointer;font:inherit;border-radius:3px}.lsn:hover{background:var(--p2)}
+.iq{display:grid;grid-template-columns:1fr 150px 90px;gap:8px;align-items:center;margin:5px 0}
+.fb{border-left:3px solid var(--ln);padding:4px 10px;margin:6px 0}
+</style></head><body>
+<header><h1>Three-Statement Simulator <a href="index.html" style="font-size:12px;font-weight:500;margin-left:14px;color:var(--ac)">← Back to portfolio</a></h1>
+<div style="display:flex;gap:14px;align-items:center"><span class="small">Tax rate %</span><input id="tax" type="number" value="20" min="0" max="60" style="width:70px"><span id="badge" class="badge ok"></span></div></header>
+<nav><button data-m="sim" class="on">Simulator</button><button data-m="learn">Learn</button><button data-m="int">Interview</button></nav>
+<div class="wrap"><aside>
+<div class="card" id="ctl"></div>
+<div class="card"><h2>Transaction journal</h2><div id="jr" class="j"></div></div>
+<div class="card"><h2>Assumptions</h2><ul class="small">
+<li>Tax rate default 20%; taxes are paid in cash in the period; no NOLs, no deferred taxes. If EBT is negative the model books a tax benefit (cash refund), a simplification.</li>
+<li>Fictional company; illustrative dollars; no fees, FX or consolidation.</li>
+<li>Asset sales are at book value (no gain/loss). Impairments and write-offs are tax-deductible and shown as a separate line within EBIT.</li>
+<li>Debt-financed purchases are non-cash: the asset and the debt appear, but only the cash-paid part hits the CFS.</li>
+<li>Amortization reduces Other Assets (intangibles). Deferred revenue is carried in Other Liabilities and is not recognized as revenue.</li>
+<li>Not modeled: gains/losses, deferred taxes, interest accruals, leases, multiple periods of revenue recognition. Scenarios needing these are outside the engine.</li></ul></div>
+</aside><main id="main"></main></div>
+<script>
+// ===== ENGINE =====
+const BASE={cash:200,ar:100,inv:150,ppe:500,oth:50,ap:80,debt:300,ol:20,cs:200,re:400,
+ is:{rev:1000,cogs:600,opex:200,da:50,imp:0,int:20,tax:26},cf:{ni:104,nc:50,wc:0,capex:-50,oinv:0,debt:-30,eq:0,div:-24}};
+const clone=o=>JSON.parse(JSON.stringify(o));
+const Z=o=>{const d={is:{rev:0,cogs:0,opex:0,da:0,imp:0,int:0},cf:{nc:0,wc:0,capex:0,oinv:0,debt:0,eq:0,div:0},bs:{ar:0,inv:0,ppe:0,oth:0,ap:0,ol:0,debt:0,cs:0},m:{pa:0,dep:0,imp:0,disp:0}};for(const g in o)Object.assign(d[g],o[g]);return d};
+const merge=ds=>{const o=Z({});ds.forEach(d=>{for(const g in o)for(const k in o[g])o[g][k]+=d[g][k]});return o};
+// id:[name, group, default amount, builder(a,p), economics]
+const T={
+rev_cash:['Revenue earned in cash','Operating',100,a=>Z({is:{rev:a}}),'Revenue is recognized when earned. Here the customer pays at once, so cash comes in. Tax is owed on the profit, so the cash you keep is revenue less tax, and the same amount lands in retained earnings (the profit belongs to shareholders).'],
+rev_credit:['Revenue recognized, not yet collected','Operating',100,a=>Z({is:{rev:a},cf:{wc:-a},bs:{ar:a}}),'Accounting recognition and cash movement diverge. Revenue and net income rise now (the sale was earned), but the customer has not paid, so you hold a receivable instead of cash. The CFS subtracts the A/R increase to undo the non-cash revenue. Tax is still paid on the profit, so cash actually falls.'],
+cogs:['COGS increases (paid in cash)','Operating',40,a=>Z({is:{cogs:a}}),'Costs of goods sold reduce profit and, when paid in cash, cash leaves. Tax falls because expenses are deductible, so cash falls by less than the cost: after-tax cost = cost x (1 - tax rate).'],
+opex:['Operating expenses increase (cash)','Operating',20,a=>Z({is:{opex:a}}),'A cash operating expense hits net income net of its tax shield and reduces cash by the same after-tax amount, with retained earnings falling to match.'],
+dep:['Depreciation increases','Operating',10,a=>Z({is:{da:a},cf:{nc:a},bs:{ppe:-a},m:{dep:a}}),'Depreciation spreads the cost of an asset bought earlier over its useful life. It is non-cash: no money leaves this period. It lowers pre-tax income, so taxes fall (the tax shield = depreciation x tax rate). Net income falls by the after-tax amount, but the add-back restores the full depreciation, so cash rises by the tax saved. PP&E falls by the depreciation; retained earnings falls by the net income hit.'],
+amort:['Amortization increases','Operating',10,a=>Z({is:{da:a},cf:{nc:a},bs:{oth:-a}}),'Same mechanics as depreciation but for intangibles: a non-cash expense that lowers taxes, reduces Other Assets (intangibles) and increases cash by the tax shield.'],
+impair:['PP&E impairment / write-off','Operating',20,a=>Z({is:{imp:a},cf:{nc:a},bs:{ppe:-a},m:{imp:a}}),'The asset is worth less than its book value, so the carrying value is cut and the loss runs through the income statement. No cash moves at the time (non-cash charge, added back). Cash rises only by the tax saved, assuming the write-down is deductible (an assumption of this simulator).'],
+invwo:['Inventory write-off','Operating',20,a=>Z({is:{imp:a},cf:{nc:a},bs:{inv:-a}}),'Inventory that cannot be sold is expensed. The cash was spent earlier when it was bought; now only the accounting value drops. Net income falls, the non-cash add-back reverses the charge, and cash rises by the tax shield. Inventory and retained earnings fall.'],
+ar_inc:['Accounts receivable increases','Working capital',50,a=>Z({cf:{wc:-a},bs:{ar:a}}),'Isolated change: more of your sales are sitting uncollected, which ties up cash. Nothing on the income statement changes. Assets shift from cash to receivables, so total assets are unchanged.'],
+inv_inc:['Inventory increases (paid in cash)','Working capital',50,a=>Z({cf:{wc:-a},bs:{inv:-(-a)}}),'Buying inventory is not an expense when purchased; it is an asset until sold (then it becomes COGS). Cash leaves immediately, so cash falls while the income statement shows nothing yet. This is why growth in working capital consumes cash.'],
+ap_inc:['Accounts payable increases','Working capital',50,a=>Z({cf:{wc:a},bs:{ap:a}}),'Delaying payment to suppliers is a free short-term loan: cash is higher than it otherwise would be, but a liability of equal size appears. No effect on net income.'],
+inv_split:['Inventory purchase: part debt, part cash','Working capital',100,(a,p)=>Z({cf:{wc:-a*(1-p)},bs:{inv:a,debt:a*p}}),'Inventory rises by the full price. The debt-funded share is a non-cash exchange (new debt for inventory); only the cash-funded share shows up as a cash outflow. Nothing hits the income statement until the inventory is sold.'],
+capex:['CapEx paid with cash','Investing',100,a=>Z({cf:{capex:-a},bs:{ppe:a},m:{}}),'Buying PP&E is not expensed immediately because the asset will produce benefits for years; it is capitalized. The cash leaves now (CFI), PP&E rises by the same amount, and depreciation will appear on the income statement in later periods. No income statement effect today.'],
+sellppe:['Sell PP&E (at book value)','Investing',100,a=>Z({cf:{oinv:a},bs:{ppe:-a},m:{disp:a}}),'Selling an asset at book value swaps PP&E for cash. If sold above or below book value a gain or loss would run through the income statement; this simulator assumes none.'],
+asset_debt:['Acquire PP&E with debt','Investing',100,a=>Z({bs:{ppe:a,debt:a},m:{pa:a}}),'Both sides of the balance sheet grow by the same amount and no cash moves, so the CFS shows nothing. Interest and depreciation will affect future periods.'],
+borrow:['Borrow debt','Financing',100,a=>Z({cf:{debt:a},bs:{debt:a}}),'Borrowing brings in cash and creates an obligation. It does not create revenue or income; it is a financing inflow. Interest is the cost, and it flows through net income in later periods.'],
+repay:['Repay debt (principal)','Financing',100,a=>Z({cf:{debt:-a},bs:{debt:-a}}),'Paying principal returns borrowed money and is not an expense, so net income is unchanged. Cash and debt both fall. Only the interest portion affects net income.'],
+issue:['Issue stock','Financing',100,a=>Z({cf:{eq:a},bs:{cs:a}}),'Investors give cash for ownership. Cash and common stock/APIC rise; this is not income.'],
+repurch:['Repurchase stock','Financing',100,a=>Z({cf:{eq:-a},bs:{cs:-a}}),'Cash is returned to shareholders in exchange for shares: cash and equity both fall. Not an expense, so net income is unchanged.'],
+div:['Pay dividend','Financing',20,a=>Z({cf:{div:-a}}),'Dividends distribute profit to shareholders. They reduce cash and retained earnings but are not an expense, so net income does not change.'],
+interest:['Interest expense increases','Financing',10,a=>Z({is:{int:a}}),'Interest is the price of debt. It is an expense (reduces net income, with a tax shield) and is paid in cash. Principal and interest differ: only interest touches the income statement.'],
+sbc:['Stock-based compensation','Advanced',20,a=>Z({is:{opex:a},cf:{nc:a},bs:{cs:a}}),'Employees are paid in shares instead of cash. It is a real expense (dilutes owners) so net income falls, but it is non-cash and added back. Equity rises through APIC while retained earnings falls, so total equity moves only by the tax shield.'],
+defrev:['Deferred revenue increases (cash received upfront)','Advanced',50,a=>Z({cf:{wc:a},bs:{ol:a}}),'The customer paid before you delivered. Cash rises, but because the service is not yet delivered it is a liability, not revenue. Income recognized later as the obligation is fulfilled.']
+};
+T.inv_inc[3]=a=>Z({cf:{wc:-a},bs:{inv:a}});
+function apply(s,d,t){const n=clone(s),i=d.is,c=d.cf;
+ const ebit=i.rev-i.cogs-i.opex-i.da-i.imp,ebt=ebit-i.int,tax=ebt*t,ni=ebt-tax;
+ for(const k in i)n.is[k]+=i[k];n.is.tax+=tax;n.cf.ni+=ni;
+ for(const k of['nc','wc','capex','oinv','debt','eq','div'])n.cf[k]+=c[k];
+ const cfo=ni+c.nc+c.wc,cfi=c.capex+c.oinv,cff=c.debt+c.eq+c.div,net=cfo+cfi+cff;
+ n.cash+=net;for(const k in d.bs)n[k]+=d.bs[k];n.re+=ni+c.div;
+ return{n,r:{ebit,ebt,tax,ni,cfo,cfi,cff,net}}}
+const TA=s=>s.cash+s.ar+s.inv+s.ppe+s.oth,TLE=s=>s.ap+s.debt+s.ol+s.cs+s.re;
+function checks(s0,s1,d,r){return[
+ ['Balance sheet: Assets - (Liabilities + Equity)',TA(s1)-TLE(s1)],
+ ['Cash: Beginning + Net change - Ending',s0.cash+r.net-s1.cash],
+ ['Retained earnings: Beg + NI - Dividends - End',s0.re+r.ni+d.cf.div-s1.re],
+ ['PP&E: Beg + CapEx + non-cash adds - Dep - Impairment - Disposals - End',s0.ppe-d.cf.capex+d.m.pa-d.m.dep-d.m.imp-d.m.disp-s1.ppe]]}
+function lines(s){const i=s.is,c=s.cf,gp=i.rev-i.cogs,ebit=gp-i.opex-i.da-i.imp,ebt=ebit-i.int,ni=ebt-i.tax,cfo=c.ni+c.nc+c.wc,cfi=c.capex+c.oinv,cff=c.debt+c.eq+c.div;
+ return{'Income Statement':[['Revenue',i.rev],['COGS',i.cogs],['Gross Profit',gp,1],['Operating Expenses',i.opex],['D&A',i.da],['Impairment / Write-offs',i.imp],['EBIT',ebit,1],['Interest Expense',i.int],['EBT',ebt,1],['Taxes',i.tax],['Net Income',ni,1]],
+ 'Cash Flow Statement':[['Net Income',c.ni],['D&A / Non-cash Add-backs',c.nc],['Changes in Working Capital',c.wc],['Cash from Operations',cfo,1],['CapEx',c.capex],['Asset Sales / Other Investing',c.oinv],['Cash from Investing',cfi,1],['Debt Issuance / (Repayment)',c.debt],['Equity Issuance / (Repurchase)',c.eq],['Dividends',c.div],['Cash from Financing',cff,1],['Net Change in Cash',cfo+cfi+cff,1]],
+ 'Balance Sheet':[['Cash',s.cash],['Accounts Receivable',s.ar],['Inventory',s.inv],['PP&E',s.ppe],['Other Assets',s.oth],['Total Assets',TA(s),1],['Accounts Payable',s.ap],['Debt',s.debt],['Other Liabilities',s.ol],['Common Stock / APIC',s.cs],['Retained Earnings',s.re],['Total Liabilities + Equity',TLE(s),1]]}}
+// ===== UI =====
+const $=id=>document.getElementById(id),R=v=>Math.round(v*100)/100;
+const f$=v=>{v=R(v);return(v<0?'-$':'$')+Math.abs(v).toLocaleString()},sg=v=>{v=R(v);return v==0?'$0':(v>0?'+':'-')+'$'+Math.abs(v).toLocaleString()};
+const cls=v=>R(v)>0?'p':R(v)<0?'n':'z';
+const ar=(n,v)=>`${n} ${v>0?'↑':'↓'} ${f$(Math.abs(v))}`;
+let state=clone(BASE),hist=[],jr=[],last=null,mode='sim',cur=null;
+const tx=()=>(+$('tax').value||0)/100;
+function trace(d,r){const S=[],i=d.is,c=d.cf,nz=v=>Math.abs(v)>.004;
+ const is=[['Revenue',i.rev],['COGS',-i.cogs],['Operating expenses',-i.opex],['Depreciation & amortization',-i.da],['Impairment / write-off',-i.imp],['Interest expense',-i.int]].filter(x=>nz(x[1]));
+ const a=is.map(x=>ar(x[0],x[1]));
+ if(nz(r.ebt)||is.length){a.push('→ '+ar('EBIT',r.ebit).replace(/ ↑| ↓/,m=>m),'→ '+ar('EBT',r.ebt),'→ '+ar('Taxes',-r.tax)+` (at ${R(tx()*100)}%)`,'→ '+ar('Net Income',r.ni))}else a.push('No immediate income statement effect');
+ S.push(['Income Statement',a.filter(x=>!x.includes('$0'))]);
+ const b=[];if(nz(r.ni))b.push(ar('Net income',r.ni));
+ [['D&A / non-cash add-back',c.nc],['Working capital',c.wc],['CapEx',c.capex],['Asset sales / other investing',c.oinv],['Debt',c.debt],['Equity issued / repurchased',c.eq],['Dividends',c.div]].forEach(x=>nz(x[1])&&b.push(`${x[0]}: ${sg(x[1])}`));
+ b.push(`CFO ${sg(r.cfo)} · CFI ${sg(r.cfi)} · CFF ${sg(r.cff)}`,'→ '+ar('Cash',r.net).replace('↑ $0','unchanged'));
+ if(!nz(r.net))b[b.length-1]='→ Net change in cash: $0';
+ S.push(['Cash Flow Statement',b]);
+ const e=[];[['Cash',r.net],['A/R',d.bs.ar],['Inventory',d.bs.inv],['PP&E',d.bs.ppe],['Other assets',d.bs.oth],['A/P',d.bs.ap],['Debt',d.bs.debt],['Other liabilities',d.bs.ol],['Common stock / APIC',d.bs.cs],['Retained earnings',r.ni+c.div]].forEach(x=>nz(x[1])&&e.push(ar(x[0],x[1])));
+ S.push(['Balance Sheet',e.length?e:['No balance sheet change']]);
+ const dA=r.net+d.bs.ar+d.bs.inv+d.bs.ppe+d.bs.oth,dL=d.bs.ap+d.bs.debt+d.bs.ol,dE=d.bs.cs+r.ni+c.div;
+ S.push(['Balance check',[`Δ Assets ${sg(dA)} = Δ Liabilities ${sg(dL)} + Δ Equity ${sg(dE)}`,R(dA-dL-dE)==0?'✓ Still balanced':'⚠ Imbalance of '+f$(dA-dL-dE)]]);
+ return S}
+function showTrace(){if(!last)return;const el=$('trace');let k=0,h='<h2>Trace the Dollar</h2><div class="chain">';
+ trace(last.d,last.r).forEach(([t,items],si)=>{h+=`<div class="step" style="animation-delay:${k++*.35}s"><b>Step ${si+1} — ${t}</b><br>${items.join('<br>')}</div>`;if(si<3)h+=`<div class="arr" style="animation-delay:${k*.35-.15}s">↓</div>`});
+ el.innerHTML=h+'</div>'}
+function tables(s0,s1){const a=lines(s0),b=lines(s1);let h='<div class="tri">';
+ for(const k in a){h+=`<div class="card"><h2>${k}</h2><table><tr><th>Line item</th><th>Before</th><th>Change</th><th>After</th></tr>`;
+ a[k].forEach((x,j)=>{const y=b[k][j],c=y[1]-x[1];h+=`<tr class="${x[2]?'t':''}"><td>${x[0]}</td><td>${f$(x[1])}</td><td class="${cls(c)}">${R(c)==0?'—':sg(c)}</td><td>${f$(y[1])}</td></tr>`});h+='</table></div>'}return h+'</div>'}
+function render(rec){last=rec;const{s0,s1,d,r,title,econ}=rec;const ck=checks(s0,s1,d,r);
+ let h=`<div class="card"><h2>${title||'Current company'}</h2>${tables(s0,s1)}</div>`;
+ h+=`<div class="card"><h2>Accounting checks</h2><div class="chk">`+ck.map(c=>`<span>${c[0]}</span><b class="${Math.abs(c[1])<.005?'p':'n'}">${Math.abs(c[1])<.005?'✓ 0':'⚠ off by '+f$(c[1])}</b>`).join('')+'</div>'+(Math.abs(ck[0][1])>.005?'<p class="n">Imbalance: this transaction\'s entries do not offset. Check the line items changed above.</p>':'')+'</div>';
+ if(econ)h+=`<div class="card"><h2>Why does this happen economically?</h2><p>${econ}</p><button class="b" onclick="showTrace()">Trace the Dollar</button></div><div class="card" id="trace"></div>`;
+ $('res').innerHTML=h;badge(s1)}
+function badge(s){const o=Math.abs(TA(s)-TLE(s))<.005,b=$('badge');b.className='badge '+(o?'ok':'bad');b.textContent=o?'✓ Balance Sheet Balanced':'⚠ Balance Sheet Does Not Balance ('+f$(TA(s)-TLE(s))+')'}
+function runTx(list,title,econ){const t=tx(),ds=list.map(([id,a,p])=>T[id][3](a,p===undefined?.5:p)),d=merge(ds),{n,r}=apply(state,d,t);
+ hist.push(clone(state));jr.push(title);const s0=state;state=n;
+ render({s0,s1:n,d,r,title,econ});jrn()}
+function jrn(){$('jr').innerHTML=jr.length?jr.map((j,i)=>`${i+1}. ${j}`).join('<br>'):'<span class="small">No transactions yet.</span>'}
+function reset(){state=clone(BASE);hist=[];jr=[];jrn();render({s0:state,s1:state,d:Z({}),r:{net:0,ni:0}})}
+function simUI(){$('ctl').innerHTML=`<h2>Transaction</h2><label>Choose a transaction</label><select id="sel">${Object.entries(T).reduce((h,[k,v],i,arr)=>h+((i==0||arr[i-1][1][1]!=v[1])?(i?'</optgroup>':'')+`<optgroup label="${v[1]}">`:'')+`<option value="${k}">${v[0]}</option>`,'')}</optgroup></select>
+ <label>Amount ($)</label><input id="amt" type="number" value="10" min="0"><div id="pc" style="display:none"><label>% financed with debt</label><input id="pct" type="number" value="50" min="0" max="100"></div>
+ <button class="b" id="go">Apply transaction</button><button class="b g" id="undo">Undo last</button><button class="b g" id="rs">Reset company</button><button class="b g" id="clr">Clear history</button>
+ <p class="small">Statements show the cumulative company. Apply several transactions in a row to watch them evolve.</p>`;
+ const sync=()=>{const k=$('sel').value;$('amt').value=T[k][2];$('pc').style.display=k=='inv_split'?'block':'none'};$('sel').onchange=sync;sync();
+ $('go').onclick=()=>{const k=$('sel').value,a=+$('amt').value||0,p=(+$('pct').value||0)/100;runTx([[k,a,p]],`${T[k][0]}: ${f$(a)}${k=='inv_split'?' ('+R(p*100)+'% debt)':''}`,T[k][4])};
+ $('undo').onclick=()=>{if(!hist.length)return;const s0=state;state=hist.pop();jr.pop();jrn();render({s0:state,s1:state,d:Z({}),r:{net:0,ni:0},title:'Undid last transaction'})};
+ $('rs').onclick=reset;$('clr').onclick=()=>{jr=[];hist=[];jrn()}}
+const L=[['Revenue','Revenue grows retained earnings through net income, less tax.',[['rev_cash',100]]],['Cash expense','Expenses cost you only their after-tax amount.',[['opex',20]]],['Accounts receivable','Sold but not paid: income without cash.',[['rev_credit',100]]],['Accounts payable','Owing suppliers keeps cash in the business.',[['ap_inc',50]]],['Inventory','A cash purchase that is not an expense yet.',[['inv_inc',50]]],['CapEx','Cash becomes an asset; income unaffected.',[['capex',100]]],['Depreciation','Non-cash expense with a tax shield.',[['dep',10]]],['Debt','Cash in, liability up, no income.',[['borrow',100]]],['Interest','The income-statement cost of debt.',[['interest',10]]],['Taxes','Every pre-tax dollar of expense saves tax; compare cash vs NI.',[['opex',100]]],['CapEx + depreciation','Buy the asset, then use it up over time.',[['capex',100],['dep',10]]],['Inventory bought with debt','A non-cash purchase: stuff for borrowed money.',[['inv_split',100,1]]],['Debt + interest','Borrow, then pay the cost of borrowing.',[['borrow',100],['interest',8]]],['Stock-based compensation','Real expense, no cash.',[['sbc',20]]],['Impairment','A non-cash write-down.',[['impair',20]]],['Working-capital heavy','A growing business can burn cash while profitable.',[['rev_credit',200],['inv_inc',80],['ap_inc',50]]],['Capstone: several effects','Growth year: sell on credit, build inventory, invest, borrow, depreciate.',[['rev_credit',300],['cogs',120],['inv_inc',60],['capex',100],['borrow',100],['dep',15],['interest',8]]]];
+function learnUI(){$('ctl').innerHTML='<h2>Lessons (simple → combined)</h2>'+L.map((l,i)=>`<button class="lsn" data-i="${i}">${i+1}. ${l[0]}</button>`).join('');
+ $('ctl').querySelectorAll('.lsn').forEach(b=>b.onclick=()=>{const l=L[+b.dataset.i];reset();
+  runTx(l[2],`Lesson ${+b.dataset.i+1}: ${l[0]}`,l[1]+' Effects below are the combined result of: '+l[2].map(x=>T[x[0]][0]+' '+f$(x[1])).join('; ')+'. '+[...new Set(l[2].map(x=>T[x[0]][4]))].join(' '));showTrace()})}
+const Q=[['dep',10,'Walk me through what happens if depreciation increases by $10.'],['inv_split',100,'A company purchases $100 of inventory using 50% debt and 50% cash. Walk me through the three statements.',.5],['capex',100,'Walk me through a $100 increase in CapEx.'],['invwo',20,'What happens if a company writes off $20 of inventory?'],['sbc',20,'Walk me through $20 of stock-based compensation.'],['rev_credit',100,'The company makes $100 of sales on credit. Walk me through the three statements.'],['repay',100,'The company repays $100 of debt. Walk me through the three statements.']];
+const ITEMS=[['Net Income',(d,r)=>r.ni],['Cash from Operations',(d,r)=>r.cfo],['Cash',(d,r)=>r.net],['Accounts Receivable',d=>d.bs.ar],['Inventory',d=>d.bs.inv],['PP&E',d=>d.bs.ppe],['Accounts Payable',d=>d.bs.ap],['Debt',d=>d.bs.debt],['Retained Earnings',(d,r)=>r.ni+d.cf.div]];
+function intUI(n){cur=n===undefined?(cur===null?0:(cur+1)%Q.length):n;const q=Q[cur];
+ $('ctl').innerHTML=`<h2>Interview mode</h2><p class="small">Answer each line: direction and dollar amount (after tax at the current rate). Then check.</p>`+Q.map((x,i)=>`<button class="lsn" data-i="${i}">${i+1}. ${x[2].slice(0,42)}…</button>`).join('');
+ $('ctl').querySelectorAll('.lsn').forEach(b=>b.onclick=()=>intUI(+b.dataset.i));
+ $('res').innerHTML=`<div class="card"><h2>${q[2]}</h2><p class="small">Start from the base company. Do not peek: enter your answers, then Check Answer.</p>`+ITEMS.map((it,i)=>`<div class="iq"><span>What happens to ${it[0]}?</span><select id="d${i}"><option value="0">No change</option><option value="1">Increases</option><option value="-1">Decreases</option></select><input id="v${i}" type="number" placeholder="$ amount" min="0"></div>`).join('')+'<button class="b" id="chk">Check Answer</button><button class="b g" id="nx">Next question</button><div id="fb"></div></div><div id="rev"></div>';
+ $('nx').onclick=()=>intUI();$('chk').onclick=()=>grade(q)}
+function grade(q){const p=q[3]===undefined?.5:q[3],t=tx(),d=T[q[0]][3](q[1],p),{n,r}=apply(clone(BASE),d,t);let ok=[],mi=[],bad=[];
+ ITEMS.forEach((it,i)=>{const e=R(it[1](d,r)),dir=+$('d'+i).value,v=dir*(+$('v'+i).value||0);
+  const word=e>0?'increases by '+f$(e):e<0?'decreases by '+f$(-e):'does not change';
+  if(e==0)(dir==0?ok:bad).push(it[0]+(dir==0?' unchanged':` — it ${word}, not ${dir>0?'up':'down'}`));
+  else if(dir==0||!$('v'+i).value&&!dir)mi.push(`${it[0]} ${word}`);
+  else if(Math.sign(v)==Math.sign(e)&&Math.abs(v-e)<.01)ok.push(`${it[0]} ${word}`);
+  else if(Math.sign(v)==Math.sign(e)&&v==0)mi.push(`${it[0]} ${word} (enter an amount)`);
+  else bad.push(`${it[0]}: it ${word}`+(Math.sign(v)==Math.sign(e)?' (right direction, wrong amount)':' (wrong direction)'))});
+ const L2=a=>a.length?'<ul>'+a.map(x=>`<li>${x}</li>`).join('')+'</ul>':'<span class="small">None.</span>';
+ const iv=`Net income ${r.ni==0?'is unchanged':R(r.ni)>0?'rises '+f$(r.ni):'falls '+f$(-r.ni)}. CFO ${r.cfo==0?'is unchanged':R(r.cfo)>0?'rises '+f$(r.cfo):'falls '+f$(-r.cfo)}, so cash ${r.net==0?'is unchanged':R(r.net)>0?'rises '+f$(r.net):'falls '+f$(-r.net)}. On the balance sheet: ${[['A/R',d.bs.ar],['inventory',d.bs.inv],['PP&E',d.bs.ppe],['A/P',d.bs.ap],['debt',d.bs.debt],['retained earnings',r.ni+d.cf.div]].filter(x=>Math.abs(x[1])>.004).map(x=>x[0]+(x[1]>0?' up ':' down ')+f$(Math.abs(x[1]))).join(', ')||'no other items change'}. Assets still equal liabilities plus equity.`;
+ $('fb').innerHTML=`<div class="fb"><b class="p">Correct</b>${L2(ok)}</div><div class="fb"><b>Missing</b>${L2(mi)}</div><div class="fb"><b class="n">Incorrect</b>${L2(bad)}</div><div class="fb"><b>Why</b><p>${T[q[0]][4]}</p></div><div class="fb"><b>Interview version (20–30 seconds)</b><p>${iv}</p></div>`;
+ const s0=clone(BASE);last={s0,s1:n,d,r,title:'Answer key'};$('rev').innerHTML='<div class="card"><h2>Answer key from the engine</h2>'+tables(s0,n)+'</div><div class="card"><button class="b" id="tr">Trace the Dollar</button><div id="trace"></div></div>';$('tr').onclick=showTrace}
+function setMode(m){mode=m;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.m==m));
+ $('main').innerHTML='<div id="res"></div>';
+ if(m=='int'){intUI(0)}else{(m=='sim'?simUI:learnUI)();render({s0:state,s1:state,d:Z({}),r:{net:0,ni:0}});jrn()}}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+setMode('sim');
+</script></body></html>
